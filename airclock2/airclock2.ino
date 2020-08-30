@@ -1,18 +1,17 @@
 
-// AirClock - Wifi Clock and Air Quality Monitor
+// AirClock 2 - Wifi Clock and Air Quality Monitor
 // Based on Arduairs
 // Github: https://github.com/greenpig/airclock
 
 // Configurarions
 
 // Need to enable this to enable air quality monitoring
-#define ENABLE_BME680
+//#define ENABLE_BME680
 
 // End configuration
 
-
 #include "bsec.h"
-#include <LiquidCrystal_I2C.h>
+#include <U8g2lib.h>
 #include <WiFi.h>
 #include <WifiUdp.h>
 #include <NTPClient.h>
@@ -22,17 +21,21 @@
 #include <time.h>
 #include <WebServer.h>
 #include <AutoConnect.h>
-//#include <BigNumbers_I2C.h>
 
 #include "util.h"
-#include "HugeNumbers_I2C.h"
 
-#define VERSION "v0.6"
+#define VERSION "v2.0"
 
 
 // Controls which pins are the I2C ones.
 #define PIN_I2C_SDA 21
 #define PIN_I2C_SCL 22
+
+#define BUTTON_PIN 19
+#define BACKLIGHT_PIN 17
+
+#define FONT78 u8g2_font_logisoso78_tn
+#define FONT16 u8g2_font_crox2hb_tf
 
 // Controls how often the code persists the BSEC Calibration data
 #define STATE_SAVE_PERIOD  UINT32_C(60 * 60 * 1000) // every 60 minutes
@@ -71,10 +74,8 @@ unsigned long wifiStatusMillis = 0;
 // The I2C address of your LCD, it will likely either be 0x27 or 0x3F
 const uint8_t LCD_ADDR = 0x27;
 
-// 20 characters across, 4 lines deep
-LiquidCrystal_I2C lcd(LCD_ADDR, 20, 4);
-//BigNumbers_I2C bigNum(&lcd);
-HugeNumbers_I2C hugeNum(&lcd);
+// 256*128 LCD screen
+U8G2_ST75256_JLX256128_F_HW_I2C lcd(U8G2_R0, /* reset */ 16);
 
 // Current active screen
 int screen = 0;       // Current screen
@@ -83,8 +84,6 @@ int activeMillis = millis(); // Millis when we become active
 // Stay active for this long (millis)
 #define ACTIVE_DURATION 10000
 
-// Button setup
-#define BUTTON_PIN 12
 
 // NTP and time keeping
 WiFiUDP ntpUDP;
@@ -100,11 +99,19 @@ EasyButton button(BUTTON_PIN);
 #define SCREEN_AIR 1
 #define SCREEN_WIFI 2
 
+void backlight(bool on) {
+  if (on) {
+    digitalWrite(BACKLIGHT_PIN, 1);
+  } else {
+    digitalWrite(BACKLIGHT_PIN, 0);
+  }
+}
+
 void onButtonPressed() {
   Serial.println("Button pressed");
   if (!active) {
     active = 1;
-    lcd.backlight();
+    backlight(true);
   } else {
     screen = (screen + 1) % 3;
 #ifndef ENABLE_BME680
@@ -113,13 +120,7 @@ void onButtonPressed() {
       screen = 2;
 #endif
     lcd.clear();
-    if (screen == 0) {
-      hugeNum.begin();
-    } else if (screen == 1) {
-      // I wanted some iconography, so this function creates some icons in the LCDs memory. They were created using Maxpromers LCD Character Creator
-      createLCDSymbols();
-    }
-    lcd.backlight();
+    backlight(true);
   }
   activeMillis = millis();
 }
@@ -212,11 +213,16 @@ void setup(void)
   Serial.println("Firmware has air quality sensor disabled.");
 #endif
 
-  lcd.begin();
-  lcd.backlight();
+  // Set up screen
+  pinMode(BACKLIGHT_PIN, OUTPUT);
 
-//  bigNum.begin();
-  hugeNum.begin();
+  lcd.begin();
+  lcd.setContrast(0xa0);
+  lcd.setFont(FONT16);
+  lcd.setFontRefHeightExtendedText();
+  lcd.setDrawColor(1);
+  lcd.setFontPosTop();
+  lcd.setFontDirection(0);  
 
   // Set up button
   pinMode(BUTTON_PIN, INPUT_PULLUP);
@@ -228,15 +234,11 @@ void setup(void)
   Serial.println("Starting Web Server");
   server.on("/", rootPage);
 
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Connecting Wifi...");
-  lcd.setCursor(0, 1);
-  lcd.print("To setup, connect");
-  lcd.setCursor(0, 2);
-  lcd.print("your phone to:");
-  lcd.setCursor(0, 3);
-  lcd.print("  esp32ap/12345678");
+  lcd.clearBuffer();
+  lcd.drawStr(0, 0, "Connecting Wifi...");
+  lcd.drawStr(0, 20, "To setup, connect your phone to:");
+  lcd.drawStr(0, 40, "  esp32ap/12345678");
+  lcd.sendBuffer();
 
   AutoConnectCredential credt;
   station_config_t  config;
@@ -255,11 +257,9 @@ void setup(void)
 
   Serial.println("HTTP server:" + WiFi.localIP().toString());
   wifiConfigured = true;
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Getting time from");
-  lcd.setCursor(0, 1);
-  lcd.print("server...");
+  lcd.clearBuffer();
+  lcd.drawStr(0, 0, "Getting time from server...");
+  lcd.sendBuffer();
 
   Serial.println("Syncing time...");
   timeClient.begin();
@@ -271,7 +271,9 @@ void setup(void)
 
   wifiOff();
 
-  lcd.clear();
+  lcd.clearBuffer();
+  backlight(true);  
+  lcd.sendBuffer();
 
   activeMillis = millis();
 
@@ -292,6 +294,14 @@ void clockScreen() {
   epochToDateTime(nowEpoch, timezone, &dt);
 
   // print time
+  lcd.setFont(FONT78);
+  lcd.setCursor(15,8);
+  lcd.printf("%02d:%02d", dt.tm_hour, dt.tm_min);
+  lcd.setFont(FONT16);
+  lcd.setCursor(90,110);
+  lcd.printf("%04d-%02d-%02d", dt.tm_year, dt.tm_mon + 1, dt.tm_mday);
+    
+/*
 //  bigNum.displayLargeInt(dt.tm_hour, 0, 0, 2, true);
 //  bigNum.displayLargeInt(dt.tm_min, 7, 0, 2, true);
 //  bigNum.displayLargeInt(dt.tm_sec, 14, 0, 2, true);
@@ -307,7 +317,7 @@ void clockScreen() {
 
   // print date at bottom
   lcd.setCursor(5, 3);
-  lcd.printf("%04d-%02d-%02d", dt.tm_year, dt.tm_mon + 1, dt.tm_mday);
+  lcd.printf("%04d-%02d-%02d", dt.tm_year, dt.tm_mon + 1, dt.tm_mday); */
 }
 
 void airQualityScreen() {
@@ -332,10 +342,8 @@ void wifiScreen() {
     wifiSwitchRequested = false;
     lcd.clear();
     lcd.setCursor(0, 0);
-    lcd.print("To setup, connect");
-    lcd.setCursor(0, 1);
-    lcd.print("your phone to:");
-    lcd.setCursor(0, 2);
+    lcd.print("To setup, connect your phone to: ");
+    lcd.setCursor(0, 20);
     lcd.print("  esp32ap/12345678");
     wifiAutoConnect();
     lcd.clear();
@@ -349,11 +357,10 @@ void wifiScreen() {
       wifiStatusMillis = now;
       lcd.setCursor(0, 0);
       lcd.print("Connected to:");
-      lcd.setCursor(2, 1);
       lcd.print(ssid);
-      lcd.setCursor(0, 2);
+      lcd.setCursor(0, 20);
       lcd.print("Long press to reset");
-      lcd.setCursor(0, 3);
+      lcd.setCursor(0, 40);
       lcd.print(VERSION);
     }
     server.handleClient();
@@ -377,10 +384,11 @@ void loop(void)
     unsigned long now = millis();
     if (active && now - activeMillis > ACTIVE_DURATION) {
       active = 0;
-      lcd.noBacklight();
+      backlight(false);
     }
   }
 
+  lcd.clearBuffer();
   switch (screen) {
     case 0: {
         clockScreen();
@@ -395,6 +403,7 @@ void loop(void)
         break;
       }
   }
+  lcd.sendBuffer();
 
   // update NTP every 10 mins
   unsigned long now = millis();
@@ -457,7 +466,7 @@ void checkIaqSensorStatus(void)
 void displayIAQ(String iaq)
 {
   lcd.setCursor(0, 0);
-  lcd.write(0);
+  lcd.print("IAQ   ");
   lcd.print(iaq);
   char carr[iaq.length()];
   iaq.toCharArray(carr, iaq.length());
@@ -466,9 +475,11 @@ void displayIAQ(String iaq)
 
 void displayTemp(String tmp)
 {
-  lcd.setCursor(14, 0);
+  lcd.setCursor(128, 0);
+  lcd.print("TEMP  ");
   lcd.print(tmp);
-  lcd.write(1);
+  lcd.write(248);  // degree symbol
+  lcd.print("C");
   char carr[tmp.length()];
   tmp.toCharArray(carr, tmp.length());
   //  broker.publish("bme680/temperature", carr);
@@ -476,8 +487,8 @@ void displayTemp(String tmp)
 
 void displayHumidity(String humidity)
 {
-  lcd.setCursor(0, 1);
-  lcd.write(2);
+  lcd.setCursor(0, 20);
+  lcd.print("HUMID ");
   lcd.print(humidity + "%");
   char carr[humidity.length()];
   humidity.toCharArray(carr, humidity.length());
@@ -486,9 +497,9 @@ void displayHumidity(String humidity)
 
 void displayPressure(String pressure)
 {
-  lcd.setCursor(12, 1);
+  lcd.setCursor(128, 20);
+  lcd.print("PRESS ");
   lcd.print(pressure);
-  lcd.write(3);
   char carr[pressure.length()];
   pressure.toCharArray(carr, pressure.length());
   //  broker.publish("bme680/pressure", carr);
@@ -496,8 +507,8 @@ void displayPressure(String pressure)
 
 void displayCO2(String co)
 {
-  lcd.setCursor(0, 3);
-  lcd.print("CO2 " + co + "ppm");
+  lcd.setCursor(0, 40);
+  lcd.print("CO2   " + co + "ppm");
   char carr[co.length()];
   co.toCharArray(carr, co.length());
   //  broker.publish("bme680/co", carr);
@@ -505,7 +516,7 @@ void displayCO2(String co)
 
 void displayVOC(String voc)
 {
-  lcd.setCursor(0, 2);
+  lcd.setCursor(128, 40);
   lcd.print("VOC " + voc + "ppm");
   char carr[voc.length()];
   voc.toCharArray(carr, voc.length());
@@ -514,7 +525,7 @@ void displayVOC(String voc)
 
 void displaySensorPersisted()
 {
-  lcd.setCursor(19, 3);
+  lcd.setCursor(248, 112);
   lcd.print(sensorPersisted);
 }
 
@@ -572,53 +583,6 @@ void displaySensorPersisted()
   }
   }
 */
-
-void createLCDSymbols() {
-  byte iaqsymbol[] = {
-    0x04,
-    0x0A,
-    0x1F,
-    0x11,
-    0x0E,
-    0x0A,
-    0x0E,
-    0x02
-  };
-  lcd.createChar(0, iaqsymbol);
-  byte tempSymbol[] = {
-    0x18,
-    0x18,
-    0x07,
-    0x04,
-    0x04,
-    0x04,
-    0x04,
-    0x07
-  };
-  lcd.createChar(1, tempSymbol);
-  byte humiditySymbol[] = {
-    0x04,
-    0x04,
-    0x0A,
-    0x0A,
-    0x11,
-    0x11,
-    0x0A,
-    0x04
-  };
-  lcd.createChar(2, humiditySymbol);
-  byte airPressureSymbol[] = {
-    0x04,
-    0x15,
-    0x0E,
-    0x04,
-    0x01,
-    0x1E,
-    0x01,
-    0x1E
-  };
-  lcd.createChar(3, airPressureSymbol);
-}
 
 // loadState attempts to read the BSEC state from the EEPROM. If the state isn't there yet - it wipes that area of the EEPROM ready to be written to in the future. It'll also set the global variable 'sensorPersisted' to a space, so that the question mark disappears forever from the LCD.
 void loadState(void)

@@ -1,19 +1,53 @@
-# AirClock - Wifi Clock and Air Quality Monitor
+# AirClock 2 - Wifi Clock and Air Quality Monitor
 
-Feng Zhou, July-August, 2020
+Feng Zhou, July-September, 2020
 
 ## Overview
 
-This is a Wifi clock and air quality monitor based on [Kevin Norman's Air Quaility Meter project](https://kn100.me/where-embedded-meets-the-internet-building-your-own-air-quality-meter/)(See [PDF](hardware.pdf) for a local copy).  Hardware is similar. Additions are a button between pin 
-12 and GND, and a LiPo battery. Most of the changes are on the software side. I added easy 
-Wifi configuration (the original project uses hard-coded Wifi SSID/password), an always-accurate clock 
-(network-synced), and a button to switch between functionalities.
+This is a Wifi clock and air quality monitor based on [AirClock](https://github.com/greenpig/airclock), which is in turn inspired by [Kevin Norman's Air Quaility Meter project](https://kn100.me/where-embedded-meets-the-internet-building-your-own-air-quality-meter/)(See [PDF](hardware.pdf) for a local copy).  Compared to AirClock, the text LCD screen is changed to a 5-inch 256x128 graphics LCD, and
+a 3D-printed enclusure design is included. 
+
+Features,
+
+ * Air quality monitoring: VOC, CO2, temperature, humidity, air pressure and overall Air-Quality Index.
+ * Always-accurate clock (network-synced).
+ * Long lasting Lithium battery lasting 1 month per charge (through standard micro-USB port).
+ * Reflective monochrome LCD screen for easy viewing in bright environment including outdoors. For dark
+   environment, back light could be turned on by pressing button.
+ * Easy Wifi configuration, not hard-coded Wifi password.
 
 Enjoy!
 
 ## Final product
 
-See [inside image](doc/AirClock_1.jpg), [front panel](doc/AirClock_2.jpg), and [breadboard version](doc/AirClock_breadboard.jpg).
+TODO: See [inside image](doc/AirClock_1.jpg), [front panel](doc/AirClock_2.jpg), and [breadboard version](doc/AirClock_breadboard.jpg).
+
+## Hardware
+ 
+See photos of [board up side](doc/Board_up.jpeg), [board bottom side](doc/Board_bottom.jpeg), [LCD pcb](doc/LCD_board.jpeg).
+
+Bill of materials:
+
+|---|---|
+| ESP32 board  | Wemos Lolin32 v1.0.0 |
+| LCD screen | JLX256128G-931-PN (I2C variant) |
+| Sensor module | Bosch BME680 module (see board photo) | 
+| Battery    | 2000mAh Lipo battery |
+| Button     | See board photo |
+| PCB        | 2.54mm-pitch 7cm*9cm experiment PCB |
+|---|---|
+
+Wirings,
+
+ * LCD to ESP32
+   * D0 - SCL, D1 - SDA, GND/CS - GND, RST - 16, RS - VDD - 3V, VSS - GND, LEDA - 17.
+ * LCD to LCD
+   * D1 - D2 - D3
+   * VDD - RW - RD - D4 - D5
+   * D6 - D7 - CS
+ * BME680 to ESP32
+   * SDA - SDA, SCL - SCL, GND - GND, VCC - 3V
+ * Button between pin 19 and GND.
 
 ## Instructions
 
