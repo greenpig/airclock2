@@ -20,14 +20,15 @@ Enjoy!
 
 ## Final product
 
-TODO: See [inside image](doc/AirClock_1.jpg), [front panel](doc/AirClock_2.jpg), and [breadboard version](doc/AirClock_breadboard.jpg).
+See [finished product](doc/Clock_screen.jpeg).
 
 ## Hardware
  
-See photos of [board up side](doc/Board_up.jpeg), [board bottom side](doc/Board_bottom.jpeg), [LCD pcb](doc/LCD_board.jpeg).
+See photos of [board up side](doc/Board_up.jpeg), [board bottom side](doc/Board_bottom.jpeg), [LCD PCB](doc/LCD_board.jpeg).
 
-Bill of materials:
+Parts:
 
+| Part  | Model  |
 |---|---|
 | ESP32 board  | Wemos Lolin32 v1.0.0 |
 | LCD screen | JLX256128G-931-PN (I2C variant) |
@@ -35,9 +36,8 @@ Bill of materials:
 | Battery    | 2000mAh Lipo battery |
 | Button     | See board photo |
 | PCB        | 2.54mm-pitch 7cm*9cm experiment PCB |
-|---|---|
 
-Wirings,
+Wirings:
 
  * LCD to ESP32
    * D0 - SCL, D1 - SDA, GND/CS - GND, RST - 16, RS - VDD - 3V, VSS - GND, LEDA - 17.
