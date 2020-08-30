@@ -93,6 +93,9 @@ unsigned long ntpEpoch = 1577808000;    // 2020-1-1 0:0:0 Beijing time
 unsigned long ntpMillis;    // millis() value at NTP sync time
 unsigned long ntpAttemptMillis;    // 上一次尝试同步时间的millis，不管成功没成功（可能Wifi不通什么的）
 
+// Keep track of last displayed minutes. Screen is refreshed only when this changes.
+int lastMin = -1;
+
 EasyButton button(BUTTON_PIN);
 
 #define SCREEN_CLOCK 0
@@ -120,6 +123,7 @@ void onButtonPressed() {
       screen = 2;
 #endif
     lcd.clear();
+    lastMin = -1;
     backlight(true);
   }
   activeMillis = millis();
@@ -172,6 +176,8 @@ bool wifiAutoConnect() {
 void setup(void)
 {
   setCpuFrequencyMhz(80);
+  disableCore0WDT();    // see: https://forum.arduino.cc/index.php?topic=621311.0
+  disableCore1WDT();
 
   Serial.begin(115200);
   Serial.println("Airmonitor started.\n");
@@ -251,6 +257,9 @@ void setup(void)
   station_config_t  config;
   for (int8_t e = credt.entries() - 1; e >= 0; e--) { // looping from most recent to oldest
     credt.load(e, &config);
+    lcd.setCursor(0, 60);
+    lcd.printf("Trying %20s...", config.ssid);
+    lcd.sendBuffer();
     if (wifiOn((char *)config.ssid, (char *)config.password, 30000)) {
       strncpy(ssid, (char *)config.ssid, sizeof(ssid) - 1);
       strncpy(passwd, (char *)config.password, sizeof(passwd) - 1);
@@ -259,6 +268,9 @@ void setup(void)
   }
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("Starting AutoConnect Server");
+    lcd.setCursor(0,80);
+    lcd.print("Cannot connect. Please reconfig or reset.");
+    lcd.sendBuffer();
     wifiAutoConnect();
   }
 
@@ -300,33 +312,18 @@ void clockScreen() {
   struct tm dt;
   epochToDateTime(nowEpoch, timezone, &dt);
 
-  // print time
-  lcd.clearBuffer();
-  lcd.setFont(FONT78);
-  lcd.setCursor(15,8);
-  lcd.printf("%02d:%02d", dt.tm_hour, dt.tm_min);
-  lcd.setFont(FONT16);
-  lcd.setCursor(90,110);
-  lcd.printf("%04d-%02d-%02d", dt.tm_year, dt.tm_mon + 1, dt.tm_mday);
-  lcd.sendBuffer();
-    
-/*
-//  bigNum.displayLargeInt(dt.tm_hour, 0, 0, 2, true);
-//  bigNum.displayLargeInt(dt.tm_min, 7, 0, 2, true);
-//  bigNum.displayLargeInt(dt.tm_sec, 14, 0, 2, true);
-//  lcd.setCursor(6, 1);
-//  lcd.print(":");
-//  lcd.setCursor(13, 1);
-//  lcd.print(":");
-  hugeNum.displayHugeInt(dt.tm_hour, 1, 0, 2, true);
-  hugeNum.displayHugeInt(dt.tm_min, 10, 0, 2, true);
-//  hugeNum.displayHugeInt(dt.tm_sec, 10, 0, 2, true);
-  lcd.setCursor(9, 1);
-  lcd.print(":");
-
-  // print date at bottom
-  lcd.setCursor(5, 3);
-  lcd.printf("%04d-%02d-%02d", dt.tm_year, dt.tm_mon + 1, dt.tm_mday); */
+  if (dt.tm_min != lastMin) {
+    lastMin = dt.tm_min;
+    // print time
+    lcd.clearBuffer();
+    lcd.setFont(FONT78);
+    lcd.setCursor(15,8);
+    lcd.printf("%02d:%02d", dt.tm_hour, dt.tm_min);
+    lcd.setFont(FONT16);
+    lcd.setCursor(90,110);
+    lcd.printf("%04d-%02d-%02d", dt.tm_year, dt.tm_mon + 1, dt.tm_mday);
+    lcd.sendBuffer();  
+  }
 }
 
 void airQualityScreen() {
@@ -420,6 +417,7 @@ void loop(void)
         break;
       }
   }
+//  vTaskDelay(10);
 
   // update NTP every 10 mins
   unsigned long now = millis();
