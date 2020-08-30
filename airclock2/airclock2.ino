@@ -6,7 +6,7 @@
 // Configurarions
 
 // Need to enable this to enable air quality monitoring
-//#define ENABLE_BME680
+#define ENABLE_BME680
 
 // End configuration
 
@@ -177,18 +177,33 @@ void setup(void)
   Serial.println("Airmonitor started.\n");
   //  broker.setServer(mqtt_server, 1883);
 
+  lcd.begin();
+  lcd.setContrast(0xa0);
+  lcd.setFont(FONT16);
+  lcd.setFontRefHeightExtendedText();
+  lcd.setDrawColor(1);
+  lcd.setFontPosTop();
+  lcd.setFontDirection(0);  
+
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
 
 #ifdef ENABLE_BME680
   // Your module MAY use the primary address, which is available as BME680_I2C_ADDR_PRIMARY
+  Serial.println("Starting BME680");
+//  iaqSensor.begin(BME680_I2C_ADDR_PRIMARY, Wire);
   iaqSensor.begin(BME680_I2C_ADDR_SECONDARY, Wire);
-  output = "\nBSEC library version " + String(iaqSensor.version.major) + "." + String(iaqSensor.version.minor) + "." + String(iaqSensor.version.major_bugfix) + "." + String(iaqSensor.version.minor_bugfix);
+  Serial.println("BME680 started");
+  output = "BSEC library version " + String(iaqSensor.version.major) + "." + String(iaqSensor.version.minor) + "." + String(iaqSensor.version.major_bugfix) + "." + String(iaqSensor.version.minor_bugfix);
   Serial.println(output);
   checkIaqSensorStatus();
+  
+  Serial.println("Setting bsec config");
   iaqSensor.setConfig(bsec_config_iaq);
 
   //loadState here refers to the BSEC Calibration state.
-  loadState();
+  Serial.println("Loading state");
+//  loadState();
+  Serial.println("State loaded");
 
   // List all the sensors we want the bsec library to give us data for
   bsec_virtual_sensor_t sensorList[10] = {
@@ -215,14 +230,6 @@ void setup(void)
 
   // Set up screen
   pinMode(BACKLIGHT_PIN, OUTPUT);
-
-  lcd.begin();
-  lcd.setContrast(0xa0);
-  lcd.setFont(FONT16);
-  lcd.setFontRefHeightExtendedText();
-  lcd.setDrawColor(1);
-  lcd.setFontPosTop();
-  lcd.setFontDirection(0);  
 
   // Set up button
   pinMode(BUTTON_PIN, INPUT_PULLUP);
@@ -294,12 +301,14 @@ void clockScreen() {
   epochToDateTime(nowEpoch, timezone, &dt);
 
   // print time
+  lcd.clearBuffer();
   lcd.setFont(FONT78);
   lcd.setCursor(15,8);
   lcd.printf("%02d:%02d", dt.tm_hour, dt.tm_min);
   lcd.setFont(FONT16);
   lcd.setCursor(90,110);
   lcd.printf("%04d-%02d-%02d", dt.tm_year, dt.tm_mon + 1, dt.tm_mday);
+  lcd.sendBuffer();
     
 /*
 //  bigNum.displayLargeInt(dt.tm_hour, 0, 0, 2, true);
@@ -323,6 +332,8 @@ void clockScreen() {
 void airQualityScreen() {
   // iaqSensor.run() will return true once new data becomes available
   if (iaqSensor.run()) {
+//    Serial.println("New sensor data is available");
+    lcd.clearBuffer();
     displayIAQ(String(iaqSensor.staticIaq));
     displayTemp(String(iaqSensor.temperature));
     displayHumidity(String(iaqSensor.humidity));
@@ -331,7 +342,9 @@ void airQualityScreen() {
     displayVOC(String(iaqSensor.breathVocEquivalent));
     displaySensorPersisted();
     updateState();
+    lcd.sendBuffer();
   } else {
+//    Serial.println("Waiting for sensor data");
     checkIaqSensorStatus();
   }
 }
@@ -340,21 +353,25 @@ void wifiScreen() {
   if (wifiSwitchRequested) {
     Serial.println("Wifi switch requested.");
     wifiSwitchRequested = false;
-    lcd.clear();
+    lcd.clearBuffer();
     lcd.setCursor(0, 0);
     lcd.print("To setup, connect your phone to: ");
     lcd.setCursor(0, 20);
     lcd.print("  esp32ap/12345678");
+    lcd.sendBuffer();
     wifiAutoConnect();
-    lcd.clear();
     Serial.println("Wifi switch finished.");
+    lcd.sendBuffer();
   } else if (!wifiConfigured) {
+    lcd.clearBuffer();
     lcd.setCursor(0, 0);
     lcd.print("Wifi not connected");
+    lcd.sendBuffer();
   } else {
     unsigned long now = millis();
     if (now - wifiStatusMillis > 1000) {
       wifiStatusMillis = now;
+      lcd.clearBuffer();
       lcd.setCursor(0, 0);
       lcd.print("Connected to:");
       lcd.print(ssid);
@@ -362,6 +379,7 @@ void wifiScreen() {
       lcd.print("Long press to reset");
       lcd.setCursor(0, 40);
       lcd.print(VERSION);
+      lcd.sendBuffer();
     }
     server.handleClient();
   }
@@ -388,7 +406,6 @@ void loop(void)
     }
   }
 
-  lcd.clearBuffer();
   switch (screen) {
     case 0: {
         clockScreen();
@@ -403,7 +420,6 @@ void loop(void)
         break;
       }
   }
-  lcd.sendBuffer();
 
   // update NTP every 10 mins
   unsigned long now = millis();
@@ -527,6 +543,8 @@ void displaySensorPersisted()
 {
   lcd.setCursor(248, 112);
   lcd.print(sensorPersisted);
+  Serial.print("Sensor persisted: ");
+  Serial.println(sensorPersisted);
 }
 
 /*

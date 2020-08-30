@@ -64,15 +64,14 @@ Wirings,
 
 4. Within Arduino IDE, use `Sketch->Library->Manage Libraries` to install the following libraries:
   * BSEC Library by Bosch Sensortec (v1.5.1474) (needs extra changes to install, see 'Talking to the BME680' in [Kevin's article](https://kn100.me/where-embedded-meets-the-internet-building-your-own-air-quality-meter/))
-  * [LiquidCrystal I2C](https://github.com/fdebrabander/Arduino-LiquidCrystal-I2C-library) 1.1.2
+  * U8g2 2.27.6
   * NTPClient 3.2.0
-  * [BigNumbers_I2C](https://github.com/Anush-DP/BigNumbers_I2C)
   * PubSubClient 2.8.0
   * EasyButton 2.0
   * PageBuilder 1.4.2
   * AutoConnect 1.1.7
 
-5. Open `airclock/airclock.ino` in Arduino IDE.
+5. Open `airclock2/airclock2.ino` in Arduino IDE.
 
 6. Connect the dev board through USB, and install the firmware with `Sketch->Upload`.
 
@@ -108,9 +107,11 @@ yet.
 
 ## Changelog
 
+ * 2.0
+   * Switch to new 256x128 graphical LCD
  * 0.6
-  * In wifi screen, long press to re-setup Wifi.
-  * Reduce clock frequency to 80Mhz to save power.
-  * Only turn on Wifi at NTP time to save power. Power is now at around 20-30mA @ 5V.
+   * In wifi screen, long press to re-setup Wifi.
+   * Reduce clock frequency to 80Mhz to save power.
+   * Only turn on Wifi at NTP time to save power. Power is now at around 20-30mA @ 5V.
  * 0.5
-  * Initial version.
+   * Initial version.
