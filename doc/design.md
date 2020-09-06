@@ -4,6 +4,21 @@ Feng Zhou, July-August, 2020
 
 # Changes
 
+2020-9-6, enabling deep sleep
+
+  * [Guide](https://randomnerdtutorials.com/esp32-timer-wake-up-deep-sleep/)
+  * Design:
+    1. Wake up (reboot) every 3 seconds, or until next minute start, which ever is shorter.
+    2. Initialize everything.
+    3. Check button press, if yes, turn on backlight or switch to next screen.
+    4. Start wifi and update NTP every 30 minutes. Turn off wifi afterwards.
+    5. Read BME680 readings. (Need more instruction on how to use BSEC library with deep sleep).
+    6. Check current screen. Update time if it is clock screen. Update sensor reading if air quality screen.
+  * TODO: Button is currently on GPIO19, which is not [RTC GPIO](https://i2.wp.com/randomnerdtutorials.com/wp-content/uploads/2018/08/ESP32-DOIT-DEVKIT-V1-Board-Pinout-36-GPIOs-updated.jpg?w=750&ssl=1). Should
+   go with something like RTC_GPIO0/GPIO36.
+  * BUG: Reset接在16上面，会因为处理器断电而走低，所以需要一个pull-up resistor？
+    * 正确解决办法应该是接在RTC GPIO上面，这样就可以保证不要走低
+
 2020-8-8
  
  * Created HugeNumbers_I2C.cpp to display `4*4` larger numbers.

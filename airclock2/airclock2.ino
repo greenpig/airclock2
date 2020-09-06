@@ -16,16 +16,12 @@
 #include <WifiUdp.h>
 #include <NTPClient.h>
 #include <EEPROM.h>
-#include <PubSubClient.h>
 #include <EasyButton.h>
 #include <time.h>
-#include <WebServer.h>
-#include <AutoConnect.h>
 
 #include "util.h"
 
-#define VERSION "v2.0"
-
+#define VERSION "v2.5"
 
 // Controls which pins are the I2C ones.
 #define PIN_I2C_SDA 21
@@ -40,9 +36,8 @@
 // Controls how often the code persists the BSEC Calibration data
 #define STATE_SAVE_PERIOD  UINT32_C(60 * 60 * 1000) // every 60 minutes
 
-const char* mqtt_server = "192.168.1.200";
-char ssid[33] = "";
-char passwd[33] = "";
+char ssid[] = "zfzl-iot";
+char passwd[] = "work4you";
 
 // Controls the offset for the temperature sensor. My BME680 was reading 4 degrees higher than another thermometer I trusted more, so my offset is 4.0.
 const float tempOffset = 4.0;
@@ -58,29 +53,24 @@ Bsec iaqSensor;
 String output;
 
 // This stores a question mark and is eventually replaced with a space character once the BSEC library has decided it has enough calibration data to persist. It is displayed in the bottom right of the LCD as a kind of debug symbol.
-String sensorPersisted = "?";
+RTC_DATA_ATTR String sensorPersisted = "?";
 
 uint8_t bsecState[BSEC_MAX_STATE_BLOB_SIZE] = {0};
 uint16_t stateUpdateCounter = 0;
 
 WiFiClient espClient;
-//PubSubClient broker(espClient);
-WebServer server;
-
-bool wifiConfigured = false;
-bool wifiSwitchRequested = false;
-unsigned long wifiStatusMillis = 0;
 
 // The I2C address of your LCD, it will likely either be 0x27 or 0x3F
 const uint8_t LCD_ADDR = 0x27;
 
 // 256*128 LCD screen
-U8G2_ST75256_JLX256128_F_HW_I2C lcd(U8G2_R0, /* reset */ 16);
+//U8G2_ST75256_JLX256128_F_HW_I2C lcd(U8G2_R0, /* reset */ 16);
+U8G2_ST75256_JLX256128_F_HW_I2C lcd(U8G2_R0, U8X8_PIN_NONE);
 
 // Current active screen
-int screen = 0;       // Current screen
-int active = 1;       // Are we "active" (backlight on)
-int activeMillis = millis(); // Millis when we become active
+RTC_DATA_ATTR int screen = 0;       // Current screen
+RTC_DATA_ATTR int active = 1;       // Are we "active" (backlight on)
+RTC_DATA_ATTR int activeMillis = millis(); // Millis when we become active
 // Stay active for this long (millis)
 #define ACTIVE_DURATION 10000
 
@@ -89,18 +79,26 @@ int activeMillis = millis(); // Millis when we become active
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "ntp.aliyun.com");
 int timezone = 8;   // Beijing time
-unsigned long ntpEpoch = 1577808000;    // 2020-1-1 0:0:0 Beijing time
-unsigned long ntpMillis;    // millis() value at NTP sync time
-unsigned long ntpAttemptMillis;    // 上一次尝试同步时间的millis，不管成功没成功（可能Wifi不通什么的）
+RTC_DATA_ATTR unsigned long ntpEpoch = 1577808000;    // 2020-1-1 0:0:0 Beijing time
+RTC_DATA_ATTR unsigned long ntpMillis;    // millis() value at NTP sync time
+RTC_DATA_ATTR unsigned long ntpAttemptMillis;    // 上一次尝试同步时间的millis，不管成功没成功（可能Wifi不通什么的）
 
 // Keep track of last displayed minutes. Screen is refreshed only when this changes.
-int lastMin = -1;
+RTC_DATA_ATTR int lastMin = -1;
 
 EasyButton button(BUTTON_PIN);
 
 #define SCREEN_CLOCK 0
 #define SCREEN_AIR 1
 #define SCREEN_WIFI 2
+
+// Deep sleep state
+RTC_DATA_ATTR int bootCount = 0;
+RTC_DATA_ATTR unsigned long millisOffset=0;
+
+unsigned long offsetMillis() {
+    return millis() + millisOffset;
+}
 
 void backlight(bool on) {
   if (on) {
@@ -112,35 +110,7 @@ void backlight(bool on) {
 
 void onButtonPressed() {
   Serial.println("Button pressed");
-  if (!active) {
-    active = 1;
-    backlight(true);
-  } else {
-    screen = (screen + 1) % 3;
-#ifndef ENABLE_BME680
-    // Skip air quality screen
-    if (screen == 1)
-      screen = 2;
-#endif
-    lcd.clear();
-    lastMin = -1;
-    backlight(true);
-  }
-  activeMillis = millis();
-}
-
-void onButtonLongPressed() {
-  Serial.println("Button long pressed");
-  if (screen == SCREEN_WIFI) {
-    wifiSwitchRequested = true;
-    Serial.println("Wifi switch requested");
-  }
-}
-
-void rootPage() {
-  Serial.println("Serving home page");
-  char content[] = "Hello, world!";
-  server.send(200, "text/plain", content);
+  screen = (screen + 1) % 2;
 }
 
 bool wifiOn(const char* ssid, const char* password, unsigned long timeout) {
@@ -162,37 +132,44 @@ bool wifiOff() {
   WiFi.mode(WIFI_OFF);
 }
 
-bool wifiAutoConnect() {
-  Serial.println("Starting wifi auto connect...");
-  AutoConnectConfig config;
-  config.immediateStart = true;
-  AutoConnect portal(server);
-  portal.config(config);
-  if (portal.begin()) {
-    portal.end();
+bool lcdInitialized = false;
+
+void initLcd() {
+  if (!lcdInitialized) {
+    lcd.initDisplay();
+    lcd.setFont(FONT16);
+    lcd.setFontRefHeightExtendedText();
+    lcd.setDrawColor(1);
+    lcd.setFontPosTop();
+    lcd.setFontDirection(0);    
+    lcd.setContrast(0xa0);  
+    lcd.setPowerSave(0);
+    lcdInitialized = true;  
   }
 }
 
-void setup(void)
-{
-  setCpuFrequencyMhz(80);
+void initAllBoot() {  
+//  setCpuFrequencyMhz(80);
+
+  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);  
+
+  // Set up screen
+  pinMode(BACKLIGHT_PIN, OUTPUT);
+
+  // Set up button
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  button.begin();
+
+  button.onPressed(onButtonPressed);
+}
+
+void initFirstBoot() {
+  Serial.println("Airmonitor started.\n");
   disableCore0WDT();    // see: https://forum.arduino.cc/index.php?topic=621311.0
   disableCore1WDT();
+}
 
-  Serial.begin(115200);
-  Serial.println("Airmonitor started.\n");
-  //  broker.setServer(mqtt_server, 1883);
-
-  lcd.begin();
-  lcd.setContrast(0xa0);
-  lcd.setFont(FONT16);
-  lcd.setFontRefHeightExtendedText();
-  lcd.setDrawColor(1);
-  lcd.setFontPosTop();
-  lcd.setFontDirection(0);  
-
-  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
-
+void initBME() {
 #ifdef ENABLE_BME680
   // Your module MAY use the primary address, which is available as BME680_I2C_ADDR_PRIMARY
   Serial.println("Starting BME680");
@@ -232,87 +209,18 @@ void setup(void)
   checkIaqSensorStatus();
 #else
   Serial.println("Firmware has air quality sensor disabled.");
-#endif
-
-  // Set up screen
-  pinMode(BACKLIGHT_PIN, OUTPUT);
-
-  // Set up button
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
-  button.begin();
-
-  button.onPressed(onButtonPressed);
-  button.onPressedFor(2000, onButtonLongPressed);
-
-  Serial.println("Starting Web Server");
-  server.on("/", rootPage);
-
-  lcd.clearBuffer();
-  lcd.drawStr(0, 0, "Connecting Wifi...");
-  lcd.drawStr(0, 20, "To setup, connect your phone to:");
-  lcd.drawStr(0, 40, "  esp32ap/12345678");
-  lcd.sendBuffer();
-
-  AutoConnectCredential credt;
-  station_config_t  config;
-  for (int8_t e = credt.entries() - 1; e >= 0; e--) { // looping from most recent to oldest
-    credt.load(e, &config);
-    lcd.setCursor(0, 60);
-    lcd.printf("Trying %20s...", config.ssid);
-    lcd.sendBuffer();
-    if (wifiOn((char *)config.ssid, (char *)config.password, 30000)) {
-      strncpy(ssid, (char *)config.ssid, sizeof(ssid) - 1);
-      strncpy(passwd, (char *)config.password, sizeof(passwd) - 1);
-      break;
-    }
-  }
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("Starting AutoConnect Server");
-    lcd.setCursor(0,80);
-    lcd.print("Cannot connect. Please reconfig or reset.");
-    lcd.sendBuffer();
-    wifiAutoConnect();
-  }
-
-  Serial.println("HTTP server:" + WiFi.localIP().toString());
-  wifiConfigured = true;
-  lcd.clearBuffer();
-  lcd.drawStr(0, 0, "Getting time from server...");
-  lcd.sendBuffer();
-
-  Serial.println("Syncing time...");
-  timeClient.begin();
-  while (!timeClient.update())
-    timeClient.forceUpdate();
-  ntpEpoch = timeClient.getEpochTime();
-  ntpAttemptMillis = ntpMillis = millis();
-  Serial.printf("NTP epoch = %ul\n", ntpEpoch);
-
-  wifiOff();
-
-  lcd.clearBuffer();
-  backlight(true);  
-  lcd.sendBuffer();
-
-  activeMillis = millis();
-
-  // Set up light sleep for saving power
-  esp_sleep_enable_timer_wakeup(500000);
-  esp_sleep_enable_ext0_wakeup(GPIO_NUM_12, 0);    // Press button to wake. 0 means wake up on high to low
-
-  /* zf: No network for now
-    connectToNetwork();
-  */
+#endif  
 }
 
 void clockScreen() {
-  unsigned long nowMillis = millis();
+  unsigned long nowMillis = offsetMillis();
   unsigned long nowEpoch = ntpEpoch + (nowMillis - ntpMillis) / 1000;
 
   struct tm dt;
   epochToDateTime(nowEpoch, timezone, &dt);
 
   if (dt.tm_min != lastMin) {
+    initLcd();
     lastMin = dt.tm_min;
     // print time
     lcd.clearBuffer();
@@ -323,10 +231,18 @@ void clockScreen() {
     lcd.setCursor(90,110);
     lcd.printf("%04d-%02d-%02d", dt.tm_year, dt.tm_mon + 1, dt.tm_mday);
     lcd.sendBuffer();  
+//    delay(1000);
   }
 }
 
 void airQualityScreen() {
+  initLcd();  
+  lcd.clearBuffer();
+  lcd.setCursor(0, 0);
+  lcd.println("This is the air quality screen");
+  lcd.sendBuffer();
+
+  /*
   // iaqSensor.run() will return true once new data becomes available
   if (iaqSensor.run()) {
 //    Serial.println("New sensor data is available");
@@ -344,65 +260,85 @@ void airQualityScreen() {
 //    Serial.println("Waiting for sensor data");
     checkIaqSensorStatus();
   }
+  */
 }
 
-void wifiScreen() {
-  if (wifiSwitchRequested) {
-    Serial.println("Wifi switch requested.");
-    wifiSwitchRequested = false;
-    lcd.clearBuffer();
-    lcd.setCursor(0, 0);
-    lcd.print("To setup, connect your phone to: ");
-    lcd.setCursor(0, 20);
-    lcd.print("  esp32ap/12345678");
-    lcd.sendBuffer();
-    wifiAutoConnect();
-    Serial.println("Wifi switch finished.");
-    lcd.sendBuffer();
-  } else if (!wifiConfigured) {
-    lcd.clearBuffer();
-    lcd.setCursor(0, 0);
-    lcd.print("Wifi not connected");
-    lcd.sendBuffer();
-  } else {
-    unsigned long now = millis();
-    if (now - wifiStatusMillis > 1000) {
-      wifiStatusMillis = now;
+
+void setup(void)
+{
+  Serial.begin(115200);
+
+  //Increment boot number and print it every reboot
+  ++bootCount;
+  Serial.println("Boot number: " + String(bootCount));
+
+  pinMode(16, OUTPUT);
+  digitalWrite(16, 1);
+  if (bootCount == 1) {
+    // Manually reset display
+    digitalWrite(16, 0);
+    delay(100);
+    digitalWrite(16, 1);  
+  }
+
+  initAllBoot();
+
+  // #1: First boot, connect to wifi and get initial NTP time
+  if (bootCount == 1) {
+    initFirstBoot();
+
+    int tries = 0;
+    initLcd();
+    while (true) {
       lcd.clearBuffer();
       lcd.setCursor(0, 0);
-      lcd.print("Connected to:");
-      lcd.print(ssid);
-      lcd.setCursor(0, 20);
-      lcd.print("Long press to reset");
-      lcd.setCursor(0, 40);
-      lcd.print(VERSION);
+      lcd.printf("Connecting to network %s...", ssid);
+      if (tries > 0) {
+        lcd.setCursor(0, 20);
+        lcd.printf("Retry #%d.", tries);
+      }
       lcd.sendBuffer();
+  
+      if (wifiOn(ssid, passwd, 30000))
+        break;      
     }
-    server.handleClient();
-  }
-}
-
-// Function that is looped forever
-void loop(void)
-{
-  // 0: clock, 1: air quality, 2: Wifi Setup
-  /* zf: disable MQTT for now
-    if (!broker.connected()) {
-      reconnectToBroker();
-    }
-    broker.loop();
-  */
-  //  Serial.println(digitalRead(BUTTON_PIN));
-  button.read();
-
-  if (screen == 0 || screen == 1) {
-    unsigned long now = millis();
-    if (active && now - activeMillis > ACTIVE_DURATION) {
-      active = 0;
-      backlight(false);
-    }
+    lcd.clearBuffer();
+    lcd.drawStr(0, 0, "Getting time from server...");
+    lcd.sendBuffer();
+  
+    Serial.println("Syncing time...");
+    timeClient.begin();
+    while (!timeClient.update())
+      timeClient.forceUpdate();
+    ntpEpoch = timeClient.getEpochTime();
+    ntpAttemptMillis = ntpMillis = offsetMillis();
+    Serial.printf("NTP epoch = %ul, ntpAttemptMillis=%ul\n", ntpEpoch, ntpAttemptMillis);
+  
+    wifiOff();
   }
 
+  // #2, respond to button press
+  button.read();      // this will call onButtonPressed() to switch screen
+
+  // #3, Update NTP every 30 minutes.
+  unsigned long now = offsetMillis();
+  if (now - ntpAttemptMillis > 30 * 60 * 1000) {
+    Serial.printf("NTP update: start. now=%ul, ntpAttemptMillis=%ul\n", now, ntpAttemptMillis);
+    ntpAttemptMillis = now;
+    if (wifiOn(ssid, passwd, 30000)) {
+      Serial.println("Syncing time...");
+      timeClient.begin();
+      if (timeClient.update()) {
+        ntpEpoch = timeClient.getEpochTime();
+        ntpMillis = offsetMillis();
+        Serial.printf("NTP update: %ul\n", ntpEpoch);
+      }
+      wifiOff();
+    }
+  }
+
+  // #4 Update display according to current screen
+  Serial.printf("Update screen %d\n", screen);
   switch (screen) {
     case 0: {
         clockScreen();
@@ -412,35 +348,30 @@ void loop(void)
         airQualityScreen();
         break;
       }
-    case 2: {
-        wifiScreen();
-        break;
-      }
   }
 //  vTaskDelay(10);
 
-  // update NTP every 10 mins
-  unsigned long now = millis();
-  if (now - ntpAttemptMillis > 10 * 60 * 1000) {
-    ntpAttemptMillis = now;
-    wifiOn(ssid, passwd, 30000);
-    if (timeClient.update()) {
-      ntpEpoch = timeClient.getEpochTime();
-      ntpMillis = millis();
-      Serial.printf("NTP update: %ul\n", ntpEpoch);
-    }
-    wifiOff();
-  }
+  Serial.println("Going to sleep");
+  // Go to deep sleep, wake up every 3 seconds
+  int sleepMillis = 3000;
+  esp_sleep_enable_timer_wakeup(sleepMillis * 1000);
+  millisOffset = offsetMillis() + sleepMillis;
+//  esp_sleep_enable_ext0_wakeup(GPIO_NUM_12, 0);    // Press button to wake. 0 means wake up on high to low
+  esp_deep_sleep_start();
 
-//  if (screen != 2) {
-//    delay(100);
-//  }
-    if (screen != 2) {
-    // Go to sleep to save power, wake up 4 times a second
-    int ret = esp_light_sleep_start();
-//    esp_deep_sleep_start();
-    //  Serial.printf("light_sleep: %d\n", ret);
-    }
+}
+
+
+// Function that is looped forever
+void loop(void)
+{
+  // XXX: this is never reach because we go to deep sleep at end of setup()
+  
+  // 0: clock, 1: air quality, 2: Wifi Setup
+  //  Serial.println(digitalRead(BUTTON_PIN));
+  button.read();
+
+
 }
 
 // checks to make sure the BME680 Sensor is working correctly.
@@ -544,61 +475,6 @@ void displaySensorPersisted()
   Serial.print("Sensor persisted: ");
   Serial.println(sensorPersisted);
 }
-
-/*
-  void connectToNetwork() {
-  lcd.setCursor(0, 0);
-  lcd.print("Connecting to");
-  lcd.setCursor(0, 1);
-  lcd.print(ssid);
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, passphrase);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
-    Serial.println("Establishing connection to WiFi..");
-  }
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Connected");
-  Serial.println("Connected to network");
-  delay(1000);
-  lcd.clear();
-  }
-*/
-
-/*
-  void reconnectToBroker() {
-  // Loop until we're reconnected
-  while (!broker.connected()) {
-    lcd.setCursor(0, 0);
-    lcd.print("Connecting MQTT");
-    lcd.setCursor(0, 1);
-    lcd.print(mqtt_server);
-    Serial.print("Attempting MQTT connection...");
-    // Create a random client ID
-    String clientId = "aqm-";
-    clientId += String(random(0xffff), HEX);
-    // Attempt to connect
-    if (broker.connect(clientId.c_str())) {
-      Serial.println("connected to broker");
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("Connected");
-      delay(1000);
-    } else {
-      lcd.setCursor(0,2);
-      lcd.print("Broker failed");
-      Serial.print("failed connecting to broker, rc=");
-      Serial.print(broker.state());
-      Serial.println(" try again in 5 seconds");
-      // Wait 5 seconds before retrying
-      delay(5000);
-    }
-    lcd.clear();
-  }
-  }
-*/
 
 // loadState attempts to read the BSEC state from the EEPROM. If the state isn't there yet - it wipes that area of the EEPROM ready to be written to in the future. It'll also set the global variable 'sensorPersisted' to a space, so that the question mark disappears forever from the LCD.
 void loadState(void)
